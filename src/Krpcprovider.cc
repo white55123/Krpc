@@ -56,12 +56,31 @@ void KrpcProvider::Run()
 
     //绑定连接回调和消息回调
     server->setConnectionCallback(std::bind(&KrpcProvider::OnConnection, this, std::placeholders::_1));
-    server->setMessageCallback(std::bind(&KrpcProvider::OnMessage, this, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3));
+    server->setMessageCallback(std::bind(&KrpcProvider::OnMessage, this, std::placeholders::_1, 
+        std::placeholders::_2, std::placeholders::_3));
 
     //设置muduo库的线程数量
     server->setThreadNum(4);
 
     //把当前rpc节点上要发布的服务全部注册到zk上，让rpc client客户端在zk上发现服务
-    
+    ZkClient zkclient;
+    zkclient.Start();   //连接zookeeper
+    for(auto &sp : service_map) {
+        std::string service_path = "/" + sp.first;
+        zkclient.Create(service_path.c_str(), nullptr, 0);
+        for(auto &mp : sp.second.method_map) {
+            std::string method_path = service_path + "/" + mp.first;
+            char method_path_data[128] = {0};
+            sprintf(method_path_data, "%s:%d", ip.c_str(), port);   //ip和端口信息存入节点数据
+            // ZOO_EPHEMERAL表示这个节点是临时节点，在客户端断开连接后，ZooKeeper会自动删除这个节点
+            zkclient.Create(method_path.c_str(), method_path_data, strlen(method_path_data), ZOO_EPHEMERAL);
+        }
+    }
 
+    //RPC服务准备启动，打印信息
+    std::cout << "RpcProvider start service at ip:" << ip << "port: " << port << std::endl;
+
+    //启动网络服务
+    server->start();
+    event_loop.loop();  //进入事件循环
 }
