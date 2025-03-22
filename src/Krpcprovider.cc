@@ -84,3 +84,112 @@ void KrpcProvider::Run()
     server->start();
     event_loop.loop();  //进入事件循环
 }
+
+//连接回调函数，处理客户端连接事件
+void KrpcProvider::OnConnection(const muduo::net::TcpConnectionPtr &conn) {
+    if(!conn->connected()) {
+        //断开连接
+        conn->shutdown();
+    }
+}
+
+//消息回调函数，处理客户端发送的RPC请求
+void KrpcProvider::OnMessage(const muduo::net::TcpConnectionPtr &conn, muduo::net::Buffer *buffer, muduo::Timestap receive_time) {
+    std::cout << "OnMessage" << std::endl;
+
+    //从缓冲区读取RPC调用请求的字符流
+    std::string recv_buf = buffer->retrieveAllAsString();
+
+    //使用protobuf反序列化RPC请求
+    google::protobuf::io::ArrayInputStream raw_input(recv_buf.data(), recv_buf.size());
+    google::protobuf::io::CodedInputStream coded_input(&raw_input);
+
+    uint32_t header_size();
+    coded_input.ReadVarint32(&header_size); //解析header_size
+
+    //根据header_size读取的数据头的原始字符流，反序列化，得到RPC请求的详细信息
+    std::string rpc_header_str;
+    //待完善
+    Krpc::RpcHeader krpcHeader;
+    std::string service_name;
+    std::string method_name;
+    uint32_t args_size{};
+
+    //设置读取限制
+    google::protobuf::io::CodedInputStream::Limit msg_limit = coded_input.PushLimit(header_size);
+    coded_input.ReadString(&rpc_header_str, header_size);
+    //恢复之前的限制，以便安全的继续读取其他数据
+    coded_input.PopLimit(msg_limit);
+
+    if(KrpcHeader.ParseFromString(rpc_header_str)) {
+        //反序列化RPC
+        service_name = KrpcHeader.service_name();
+        method_name = KrpcHeader.method_name();
+        args_size = KrpcHeader.args.size();
+    } else {
+        KrpcLogger::Error("KrpcHeader parse error");
+        return;
+    }
+
+    std::string args_str;       //RPC参数
+    bool read_args_success = coded_input.ReadString(&args_str, args_size);
+    if(!read_args_success) {
+        KrpcLogger::Error("read args error");
+        return;
+    }
+
+    //获取service对象和method对象
+    auto it = service_map.find(service_name);
+    if(it == service_map.end()) {
+        std::cout << service_name << "is not exist!" << std::endl;
+        return;
+    }
+
+    auto mit = it->second.method_map.find(method_name);
+    if(mit == it->second.method_map.end()) {
+        std::cout << service_name << "." << method_name << "is not exist!" << std::endl;
+        return;
+    }
+
+    google::protobuf::Service *service = it->second.service;    //获取服务对象
+    const google::protobuf::MethodDescriptor *method = mit->second; //获取方法对象
+
+    //生成RPC方法调用请求的request和响应的response参数
+    google::protobuf::Message *request = service->GetRequestPrototype(method).New();    //动态创建
+    if(!request->ParseFromString(args_str)) {
+        std::cout << service_name << "." << method_name << "parse error!" << std::endl;
+        return;
+    }
+
+    google::protobuf::Message *response = service->GetResponsePrototype(method).New();      //动态创建
+
+    //绑定回调函数，用于在方法调用完成后发送响应
+    google::protobuf::Closure *done = google::protobuf::NewCallback<KrpcProvider,
+                                                                    const mududo::net::TcpConnectionPtr &,
+                                                                    google::protobuf::Message *>
+                                                                    (this,
+                                                                    &KrpcProvider::SendRpcResponse,
+                                                                    conn, 
+                                                                    response);
+
+
+    //在框架上根据远端的RPC请求，调用当前RPC节点上发布的方法
+    service->CallMethod(method, nullptr, request, response, done);  //调用服务方法                                                               
+}
+
+//发送RPC响应给客户端
+void KrpcProvider::SendRpcResponse(const muduo::net::TcpConnectionPtr &conn, google::protobuf::Message *response) {
+    std::string response_ptr;
+    if(response->SerializeTostring(&response_ptr)) {
+        //序列化成功，通过网络把RPC请求方法执行结果返回给RPC调用方
+        conn->send(response_ptr);
+    } else {
+        KrpcLogger::Error("serialize error");
+    }
+}
+
+//析构函数，退出事件循环
+KrpcProvider::~KrpcProvider() {
+    std::cout << "~KrpcProvider()" << std::endl;
+    event_loop.quit(); 
+}
