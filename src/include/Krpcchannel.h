@@ -1,5 +1,5 @@
-#ifndef _Krpcchannel_H
-#define _Krpcchannel_H
+#ifndef _Krpcchannel_H_
+#define _Krpcchannel_H_
 //此类继承google::protobuf::RpcChannel
 //目的是为了让客户端调用方法时，统一进行接收
 #include <google/protobuf/service.h>
@@ -28,5 +28,5 @@ private:
         int m_idx;      //划分服务器IP和PORT的下标
         bool newConnect(const char *ip, uint16_t port);
         std::string QueryServiceHost(ZkClient *zkclient, std::string service_name, std::string method_name, int &idx);
-}
+};
 #endif

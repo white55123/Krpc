@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include "KrpcLogger.h"
+#include "Krpcchannel.h"
 
 //发送RPC请求的函数，模拟客户端调用远程服务
 void send_request(int thread_id, std::atomic<int> &success_count, std::atomic<int>& fail_count) {
@@ -70,7 +71,7 @@ int main(int argc, char **argv) {
         t.join();
     }
 
-    time_t end_time = std::chrono::high_resolution_clock::now();    //记录测试结束时间
+    auto end_time = std::chrono::high_resolution_clock::now();    //记录测试结束时间
     std::chrono::duration<double> elapsed = end_time - start_time;  //计算测试耗时
 
     //输出统计结果
